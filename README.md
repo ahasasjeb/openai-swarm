@@ -5,7 +5,7 @@ Added await asyncio.sleep(0) in the run_and_stream method to release the event l
 Front end and back-end examples using FastAPI
 Place the HTML in the folder named 'templates' and name it' index. html '
 
-`pip install fastapi starlette jinja2`
+`pip install fastapi starlette jinja2 uvicorn`
 
 ```python
 #By GPT-4o
