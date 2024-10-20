@@ -1,5 +1,6 @@
 # Standard library imports
 import copy
+import asyncio
 import json
 from collections import defaultdict
 from typing import List, Callable, Union
@@ -136,97 +137,94 @@ class Swarm:
 
         return partial_response
 
-    def run_and_stream(
-        self,
-        agent: Agent,
-        messages: List,
-        context_variables: dict = {},
-        model_override: str = None,
-        debug: bool = False,
-        max_turns: int = float("inf"),
-        execute_tools: bool = True,
-    ):
-        active_agent = agent
-        context_variables = copy.deepcopy(context_variables)
-        history = copy.deepcopy(messages)
-        init_len = len(messages)
 
-        while len(history) - init_len < max_turns:
 
-            message = {
-                "content": "",
-                "sender": agent.name,
-                "role": "assistant",
-                "function_call": None,
-                "tool_calls": defaultdict(
-                    lambda: {
-                        "function": {"arguments": "", "name": ""},
-                        "id": "",
-                        "type": "",
-                    }
-                ),
-            }
+def run_and_stream(
+    self,
+    agent: Agent,
+    messages: List,
+    context_variables: dict = {},
+    model_override: str = None,
+    debug: bool = False,
+    max_turns: int = float("inf"),
+    execute_tools: bool = True,
+):
+    active_agent = agent
+    context_variables = copy.deepcopy(context_variables)
+    history = copy.deepcopy(messages)
+    init_len = len(messages)
 
-            # get completion with current history, agent
-            completion = self.get_chat_completion(
-                agent=active_agent,
-                history=history,
-                context_variables=context_variables,
-                model_override=model_override,
-                stream=True,
-                debug=debug,
-            )
+    while len(history) - init_len < max_turns:
+        message = {
+            "content": "",
+            "sender": agent.name,
+            "role": "assistant",
+            "function_call": None,
+            "tool_calls": defaultdict(
+                lambda: {"function": {"arguments": "", "name": ""}, "id": "", "type": ""}
+            ),
+        }
 
-            yield {"delim": "start"}
-            for chunk in completion:
-                delta = json.loads(chunk.choices[0].delta.json())
-                if delta["role"] == "assistant":
-                    delta["sender"] = active_agent.name
-                yield delta
-                delta.pop("role", None)
-                delta.pop("sender", None)
-                merge_chunk(message, delta)
-            yield {"delim": "end"}
+        # 获取当前历史记录的响应
+        completion = self.get_chat_completion(
+            agent=active_agent,
+            history=history,
+            context_variables=context_variables,
+            model_override=model_override,
+            stream=True,
+            debug=debug,
+        )
 
-            message["tool_calls"] = list(
-                message.get("tool_calls", {}).values())
-            if not message["tool_calls"]:
-                message["tool_calls"] = None
-            debug_print(debug, "Received completion:", message)
-            history.append(message)
+        yield {"delim": "start"}
+        for chunk in completion:
+            delta = json.loads(chunk.choices[0].delta.json())
+            if delta["role"] == "assistant":
+                delta["sender"] = active_agent.name
+            yield delta
+            delta.pop("role", None)
+            delta.pop("sender", None)
+            merge_chunk(message, delta)
 
-            if not message["tool_calls"] or not execute_tools:
-                debug_print(debug, "Ending turn.")
-                break
+            # 新增：确保每次生成数据后释放事件循环，防止阻塞
+            await asyncio.sleep(0)
 
-            # convert tool_calls to objects
-            tool_calls = []
-            for tool_call in message["tool_calls"]:
-                function = Function(
+        yield {"delim": "end"}
+
+        message["tool_calls"] = list(message.get("tool_calls", {}).values()) or None
+        debug_print(debug, "Received completion:", message)
+        history.append(message)
+
+        if not message["tool_calls"] or not execute_tools:
+            debug_print(debug, "Ending turn.")
+            break
+
+        tool_calls = [
+            ChatCompletionMessageToolCall(
+                id=tool_call["id"],
+                function=Function(
                     arguments=tool_call["function"]["arguments"],
                     name=tool_call["function"]["name"],
-                )
-                tool_call_object = ChatCompletionMessageToolCall(
-                    id=tool_call["id"], function=function, type=tool_call["type"]
-                )
-                tool_calls.append(tool_call_object)
-
-            # handle function calls, updating context_variables, and switching agents
-            partial_response = self.handle_tool_calls(
-                tool_calls, active_agent.functions, context_variables, debug
+                ),
+                type=tool_call["type"],
             )
-            history.extend(partial_response.messages)
-            context_variables.update(partial_response.context_variables)
-            if partial_response.agent:
-                active_agent = partial_response.agent
+            for tool_call in message["tool_calls"]
+        ]
 
-        yield {
-            "response": Response(
-                messages=history[init_len:],
-                agent=active_agent,
-                context_variables=context_variables,
-            )
-        }
+        # 处理工具调用并更新上下文
+        partial_response = self.handle_tool_calls(
+            tool_calls, active_agent.functions, context_variables, debug
+        )
+        history.extend(partial_response.messages)
+        context_variables.update(partial_response.context_variables)
+        if partial_response.agent:
+            active_agent = partial_response.agent
+
+    yield {
+        "response": Response(
+            messages=history[init_len:], agent=active_agent, context_variables=context_variables
+        )
+    }
+
 
     def run(
         self,
