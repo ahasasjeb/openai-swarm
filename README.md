@@ -1,5 +1,6 @@
 ![Swarm Logo](assets/logo.png)
-
+Change Summary:
+Added await asyncio.sleep(0) in the run_and_stream method to release the event loop after each chunk is processed, ensuring non-blocking streaming for WebSocket responses without altering existing logic.
 # Swarm (experimental, educational)
 
 An educational framework exploring ergonomic, lightweight multi-agent orchestration.
@@ -14,13 +15,13 @@ An educational framework exploring ergonomic, lightweight multi-agent orchestrat
 Requires Python 3.10+
 
 ```shell
-pip install git+ssh://git@github.com/openai/swarm.git
+pip install git+ssh://git@github.com/ahasasjeb/openai-swarm.git
 ```
 
 or
 
 ```shell
-pip install git+https://github.com/openai/swarm.git
+pip install git+https://github.com/ahasasjeb/openai-swarm.git
 ```
 
 ## Usage
